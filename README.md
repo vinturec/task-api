@@ -45,6 +45,3 @@ content-type: application/json
 
 Screenshot 2026-07-15 at 2.31.12 PM.png
 
-## AI vs me
-
-Coming after Stage 7.
