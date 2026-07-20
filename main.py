@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
@@ -5,7 +6,18 @@ from pydantic import BaseModel
 
 load_dotenv()  # only matters when running outside Docker; compose passes env vars directly
 
-import repository_postgres as repo  # swap this for repository_memory to go back to A2
+# Pick the storage backend without touching a single route below.
+# DB_BACKEND=memory   -> repository_memory.py   (A2 default, no persistence)
+# DB_BACKEND=sqlite   -> repository_sqlite.py   (BE-02, tasks.db file)
+# DB_BACKEND=postgres -> repository_postgres.py (BE-04, Docker + Postgres)
+DB_BACKEND = os.environ.get("DB_BACKEND", "postgres")
+
+if DB_BACKEND == "memory":
+    import repository_memory as repo
+elif DB_BACKEND == "sqlite":
+    import repository_sqlite as repo
+else:
+    import repository_postgres as repo
 
 app = FastAPI()
 
@@ -19,10 +31,9 @@ class TaskUpdate(BaseModel):
     done: Optional[bool] = None
 
 
-# ---- Stage 1 ----
 @app.get("/")
 def root():
-    return {"name": "Task API", "version": "1.0", "endpoints": ["/tasks"]}
+    return {"name": "Task API", "version": "1.0", "endpoints": ["/tasks"], "backend": DB_BACKEND}
 
 
 @app.get("/health")
@@ -30,7 +41,6 @@ def health():
     return {"status": "ok"}
 
 
-# ---- Stage 2 ----
 @app.get("/tasks")
 def get_tasks():
     return repo.get_all()
@@ -44,7 +54,6 @@ def get_task(task_id: int):
     return task
 
 
-# ---- Stage 3 ----
 @app.post("/tasks", status_code=201)
 def create_task(task: TaskCreate):
     if not task.title.strip():
@@ -52,7 +61,6 @@ def create_task(task: TaskCreate):
     return repo.create(task.title)
 
 
-# ---- Stage 4 ----
 @app.put("/tasks/{task_id}")
 def update_task(task_id: int, update: TaskUpdate):
     if update.title is not None and not update.title.strip():

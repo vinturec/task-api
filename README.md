@@ -123,3 +123,87 @@ flag you have to explicitly pass instead of just restarting the process.)
 `.env` is gitignored; `.env.example` is committed as the template. The
 app reads `DATABASE_URL` (via `docker-compose.yml`'s `environment:` block,
 which pulls from `.env` at the project root).
+## BE-02: SQLite persistence
+
+### Why SQLite
+
+SQLite needs no separate database server or installation — it's a single
+file (`tasks.db`) that Python's standard library can read and write
+directly. That makes it the right tool for a first "swap the storage
+layer" exercise: no Docker, no connection strings, no separate service to
+run. (BE-04 later swaps to Postgres for the same API, once a real server
+process is worth the complexity.)
+
+### Where the database file lives
+
+`tasks.db`, created automatically in the project root the first time the
+app runs. It's `.gitignore`d — like any real database file, it shouldn't
+be committed; only the code that creates and seeds it should be.
+
+### How to run it
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install fastapi "uvicorn[standard]" python-dotenv
+DB_BACKEND=sqlite uvicorn main:app --reload --port 8000
+```
+
+Visit http://127.0.0.1:8000/docs. `tasks.db` appears in the project folder
+the moment the app starts.
+
+### How storage backend selection works
+
+`main.py`'s routes never changed. The only thing that changed is which
+repository module gets imported, controlled by an environment variable:
+
+```python
+DB_BACKEND = os.environ.get("DB_BACKEND", "postgres")
+
+if DB_BACKEND == "memory":
+    import repository_memory as repo
+elif DB_BACKEND == "sqlite":
+    import repository_sqlite as repo
+else:
+    import repository_postgres as repo
+```
+
+This repo can now run on three different storage backends — an in-memory
+list (A2), SQLite (BE-02), or Postgres in Docker (BE-04) — using the exact
+same route code every time. That's the actual point of all three
+assignments: the API is a contract with the client; storage is an
+implementation detail behind it.
+
+### Exploring the database directly (Stage 4)
+
+Opened `tasks.db` in [DB Browser for SQLite](https://sqlitebrowser.org/)
+and ran the assignment's example queries directly against it:
+
+```sql
+SELECT * FROM tasks;
+SELECT * FROM tasks WHERE done = 1;
+SELECT COUNT(*) FROM tasks;
+UPDATE tasks SET done = 1;
+DELETE FROM tasks WHERE done = 1;
+```
+
+Example: after running `UPDATE tasks SET done = 1;` directly in the
+database viewer, `GET /tasks` immediately reflected the change without the
+app being restarted — confirming the API is just reading whatever's
+currently in the file, not caching anything in memory
+![DB Browser screenshot](./db-browser-screenshot.png)
+
+### Persistence proof
+
+```bash
+DB_BACKEND=sqlite uvicorn main:app --reload --port 8000 &
+curl -X POST http://127.0.0.1:8000/tasks -H "Content-Type: application/json" -d '{"title":"survives a restart"}'
+# stop the server (Ctrl+C), then start it again:
+DB_BACKEND=sqlite uvicorn main:app --reload --port 8000 &
+curl http://127.0.0.1:8000/tasks
+# the new task is still there
+```
+
+Also confirmed the seed data is inserted only once: restarted the app
+three times in a row and `GET /tasks` always returned exactly 3 seed rows
+plus whatever was actually added — never duplicated seeds.
